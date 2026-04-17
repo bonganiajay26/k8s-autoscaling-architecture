@@ -1,0 +1,27 @@
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: python-devops-app-vpa
+  namespace: production
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: python-devops-app
+  updatePolicy:
+    # "Off"            = only generate recommendations (safe, start here)
+    # "Initial"        = apply recommendations only on pod creation
+    # "Recreate"       = evict pods to apply new recommendations
+    # "Auto"           = evict + recreate automatically (do NOT use with HPA)
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: python-devops-app
+        minAllowed:
+          cpu: 50m
+          memory: 32Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 512Mi
+        controlledResources: ["cpu", "memory"]
+        controlledValues: RequestsAndLimits

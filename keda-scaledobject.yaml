@@ -1,0 +1,105 @@
+# KEDA ScaledObject — RabbitMQ Queue-Based Scaling
+# Scales worker pods based on RabbitMQ queue depth
+# Requires: KEDA installed in cluster (kubectl apply -f https://github.com/kedacore/keda/releases/download/v2.13.0/keda-2.13.0.yaml)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: rabbitmq-worker-scaler
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: message-processor-deployment
+  pollingInterval: 15       # check queue depth every 15 seconds
+  cooldownPeriod: 30        # wait 30s after last scale event before scaling down
+  idleReplicaCount: 0       # scale to ZERO when queue is empty (HPA cannot do this)
+  minReplicaCount: 0
+  maxReplicaCount: 30
+  triggers:
+    - type: rabbitmq
+      metadata:
+        host: amqp://rabbitmq.default.svc.cluster.local:5672
+        queueName: task-queue
+        queueLength: "10"   # 1 replica per 10 messages in queue
+---
+# KEDA ScaledObject — Kafka Consumer Lag Scaling
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kafka-consumer-scaler
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kafka-consumer-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.default.svc.cluster.local:9092
+        consumerGroup: my-consumer-group
+        topic: events-topic
+        lagThreshold: "100"   # 1 replica per 100 messages of lag
+        offsetResetPolicy: latest
+---
+# KEDA ScaledObject — Cron-Based Scaling
+# Scale to 0 at night, scale up at 8AM on weekdays
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cron-scaler
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: python-devops-app
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Asia/Kolkata
+        start: "0 8 * * 1-5"   # 8:00 AM Monday–Friday
+        end: "0 20 * * 1-5"    # 8:00 PM Monday–Friday
+        desiredReplicas: "5"
+---
+# KEDA ScaledObject — AWS SQS Queue
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sqs-worker-scaler
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sqs-worker-deployment
+  minReplicaCount: 0
+  maxReplicaCount: 25
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-credentials
+      metadata:
+        queueURL: https://sqs.ap-south-1.amazonaws.com/123456789/my-queue
+        queueLength: "5"
+        awsRegion: ap-south-1
+---
+# TriggerAuthentication for AWS credentials
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-aws-credentials
+  namespace: production
+spec:
+  secretTargetRef:
+    - parameter: awsAccessKeyID
+      name: aws-secrets
+      key: AWS_ACCESS_KEY_ID
+    - parameter: awsSecretAccessKey
+      name: aws-secrets
+      key: AWS_SECRET_ACCESS_KEY
